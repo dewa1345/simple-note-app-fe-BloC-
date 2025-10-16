@@ -1,6 +1,9 @@
+// (removed misplaced code/comments before imports)
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
+import 'bloc/note_bloc.dart';
+import 'event/note_event.dart' as noteEvent;
+import 'state/note_state.dart';
+import 'repository/note_repository.dart';
 
 void main() {
   runApp(MyApp());
@@ -25,32 +28,50 @@ class NoteList extends StatefulWidget {
 }
 
 class _NoteListState extends State<NoteList> {
-  List<dynamic> notes = [];
-  List<dynamic> selectedNotes = [];
+  void addNote(String title, String body) {
+    bloc.dispatch(noteEvent.AddNote(title, body));
+    bloc.dispatch(noteEvent.LoadNotes());
+    _updateNotes();
+  }
+
+  void updateNote(int id, String title, String body) {
+    bloc.dispatch(noteEvent.UpdateNote(id, title, body));
+    bloc.dispatch(noteEvent.LoadNotes());
+    _updateNotes();
+  }
+  late NoteBloc bloc;
+  List<Map<String, dynamic>> notes = [];
+  List<Map<String, dynamic>> selectedNotes = [];
   bool isSelectionMode = false;
 
-  Future<void> fetchNotes() async {
-    final response = await http.get(Uri.parse('http://localhost:8080/notes'));
-    if (response.statusCode == 200) {
+  @override
+  void initState() {
+    super.initState();
+    bloc = NoteBloc(NoteRepository()); // Now uses singleton
+    // Load notes directly from repository
+    fetchNotes();
+  }
+
+  void _updateNotes() {
+    final state = bloc.state;
+    if (state is NotesLoaded) {
       setState(() {
-        notes = jsonDecode(response.body);
+        notes = state.notes;
       });
-    } else {
-      throw Exception('Failed to load notes');
     }
   }
 
-  Future<void> deleteSelectedNotes() async {
-    for (var note in selectedNotes) {
-      final response = await http.delete(Uri.parse('http://localhost:8080/notes/${note['id']}'));
-      if (response.statusCode == 204) {
-        setState(() {
-          notes.remove(note);
-        });
-      } else {
-        throw Exception('Failed to delete note');
-      }
-    }
+  void fetchNotes() {
+    // Directly get notes from repository to ensure we see latest data
+    setState(() {
+      notes = NoteRepository().getNotes();
+    });
+  }
+
+  void deleteSelectedNotes() {
+    final ids = selectedNotes.map((note) => note['ID'] as int).toList();
+  bloc.dispatch(noteEvent.DeleteNotes(ids));
+    fetchNotes();
     setState(() {
       selectedNotes.clear();
       isSelectionMode = false;
@@ -58,10 +79,7 @@ class _NoteListState extends State<NoteList> {
   }
 
   @override
-  void initState() {
-    super.initState();
-    fetchNotes();
-  }
+  // ...existing code...
 
   @override
   Widget build(BuildContext context) {
@@ -108,7 +126,7 @@ class _NoteListState extends State<NoteList> {
                     builder: (context) => NoteDetail(
                       id: notes[index]['ID'],
                       note: notes[index],
-                      refreshNotes: fetchNotes, // Pass the callback function
+                      refreshNotes: fetchNotes,
                     ),
                   ),
                 );
@@ -140,7 +158,9 @@ class _NoteListState extends State<NoteList> {
                 refreshNotes: fetchNotes, // Pass the callback function
               ),
             ),
-          );
+          ).then((value) {
+            if (value == true) fetchNotes();
+          });
         },
         child: Icon(Icons.add),
       ),
@@ -242,22 +262,14 @@ class _UpdateNoteScreenState extends State<UpdateNoteScreen> {
             ),
             SizedBox(height: 20.0),
             ElevatedButton(
-              onPressed: () async {
-                final response = await http.patch(
-                  Uri.parse('http://localhost:8080/notes/${widget.id}'),
-                  body: jsonEncode({
-                    'title': _titleController.text,
-                    'body': _contentController.text,
-                  }),
-                  headers: {'Content-Type': 'application/json'},
+              onPressed: () {
+                // Use singleton repository directly to update
+                NoteRepository().updateNote(widget.id, _titleController.text, _contentController.text);
+                // show confirmation
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Note updated')),
                 );
-
-                if (response.statusCode == 200) {
-                  widget.refreshNotes(); // Refresh notes after update
-                  Navigator.pop(context);
-                } else {
-                  throw Exception('Failed to update note');
-                }
+                Navigator.pop(context, true);
               },
               child: Text('Save'),
             ),
@@ -310,21 +322,25 @@ class _AddNoteState extends State<AddNote> {
             ),
             SizedBox(height: 20.0),
             ElevatedButton(
-              onPressed: () async {
-                final response = await http.post(
-                  Uri.parse('http://localhost:8080/notes'),
-                  body: jsonEncode({
-                    'title': _titleController.text,
-                    'body': _contentController.text,
-                  }),
-                  headers: {'Content-Type': 'application/json'},
-                );
-                if (response.statusCode == 201) {
-                  widget.refreshNotes(); // Refresh notes after adding
-                  Navigator.pop(context);
-                } else {
-                  throw Exception('Failed to add note');
+              onPressed: () {
+                print('=== ADD BUTTON PRESSED ===');
+                print('Title: ${_titleController.text}');
+                print('Content: ${_contentController.text}');
+                
+                if (_titleController.text.isEmpty) {
+                  print('WARNING: Title is empty!');
+                  return;
                 }
+                
+                // Use singleton repository directly to add
+                NoteRepository().addNote(_titleController.text, _contentController.text);
+                print('=== REPOSITORY ADD CALLED ===');
+                
+                // show confirmation
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Note added')),
+                );
+                Navigator.pop(context, true);
               },
               child: Text('Add Note'),
             ),
