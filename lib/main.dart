@@ -1,4 +1,5 @@
 // (removed misplaced code/comments before imports)
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'bloc/note_bloc.dart';
 import 'event/note_event.dart' as noteEvent;
@@ -28,44 +29,39 @@ class NoteList extends StatefulWidget {
 }
 
 class _NoteListState extends State<NoteList> {
-  void addNote(String title, String body) {
-    bloc.dispatch(noteEvent.AddNote(title, body));
-    bloc.dispatch(noteEvent.LoadNotes());
-    _updateNotes();
-  }
-
-  void updateNote(int id, String title, String body) {
-    bloc.dispatch(noteEvent.UpdateNote(id, title, body));
-    bloc.dispatch(noteEvent.LoadNotes());
-    _updateNotes();
-  }
   late NoteBloc bloc;
   List<Map<String, dynamic>> notes = [];
   List<Map<String, dynamic>> selectedNotes = [];
   bool isSelectionMode = false;
+  late StreamSubscription<NoteState> _stateSubscription;
 
   @override
   void initState() {
     super.initState();
     bloc = NoteBloc(NoteRepository()); // Now uses singleton
-    // Load notes directly from repository
-    fetchNotes();
+    
+    // Listen to BLoC state stream
+    _stateSubscription = bloc.stateStream.listen((state) {
+      if (state is NotesLoaded) {
+        setState(() {
+          notes = state.notes;
+        });
+      }
+    });
+    
+    // Load initial notes
+    bloc.dispatch(noteEvent.LoadNotes());
   }
 
-  void _updateNotes() {
-    final state = bloc.state;
-    if (state is NotesLoaded) {
-      setState(() {
-        notes = state.notes;
-      });
-    }
+  @override
+  void dispose() {
+    _stateSubscription.cancel();
+    bloc.dispose();
+    super.dispose();
   }
 
   void fetchNotes() {
-    // Directly get notes from repository to ensure we see latest data
-    setState(() {
-      notes = NoteRepository().getNotes();
-    });
+    bloc.dispatch(noteEvent.LoadNotes());
   }
 
   void deleteSelectedNotes() {
@@ -126,7 +122,7 @@ class _NoteListState extends State<NoteList> {
                     builder: (context) => NoteDetail(
                       id: notes[index]['ID'],
                       note: notes[index],
-                      refreshNotes: fetchNotes,
+                      bloc: bloc,
                     ),
                   ),
                 );
@@ -155,7 +151,7 @@ class _NoteListState extends State<NoteList> {
             context,
             MaterialPageRoute(
               builder: (context) => AddNote(
-                refreshNotes: fetchNotes, // Pass the callback function
+                bloc: bloc, // Pass the BLoC instance
               ),
             ),
           ).then((value) {
@@ -171,8 +167,8 @@ class _NoteListState extends State<NoteList> {
 class NoteDetail extends StatelessWidget {
   final dynamic note;
   final int id;
-  final Function refreshNotes;
-  NoteDetail({required this.note, required this.id, required this.refreshNotes});
+  final NoteBloc bloc;
+  NoteDetail({required this.note, required this.id, required this.bloc});
 
   @override
   Widget build(BuildContext context) {
@@ -189,7 +185,7 @@ class NoteDetail extends StatelessWidget {
                   builder: (context) => UpdateNoteScreen(
                     note: note,
                     id: note['ID'],
-                    refreshNotes: refreshNotes, // Pass the callback function
+                    bloc: bloc, // Pass BLoC instance
                   ),
                 ),
               );
@@ -221,8 +217,8 @@ class NoteDetail extends StatelessWidget {
 class UpdateNoteScreen extends StatefulWidget {
   final dynamic note;
   final int id;
-  final Function refreshNotes;
-  UpdateNoteScreen({required this.note, required this.id, required this.refreshNotes});
+  final NoteBloc bloc;
+  UpdateNoteScreen({required this.note, required this.id, required this.bloc});
 
   @override
   _UpdateNoteScreenState createState() => _UpdateNoteScreenState();
@@ -263,8 +259,8 @@ class _UpdateNoteScreenState extends State<UpdateNoteScreen> {
             SizedBox(height: 20.0),
             ElevatedButton(
               onPressed: () {
-                // Use singleton repository directly to update
-                NoteRepository().updateNote(widget.id, _titleController.text, _contentController.text);
+                // Use BLoC properly - dispatch UpdateNote event
+                widget.bloc.dispatch(noteEvent.UpdateNote(widget.id, _titleController.text, _contentController.text));
                 // show confirmation
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(content: Text('Note updated')),
@@ -281,8 +277,8 @@ class _UpdateNoteScreenState extends State<UpdateNoteScreen> {
 }
 
 class AddNote extends StatefulWidget {
-  final Function refreshNotes;
-  AddNote({required this.refreshNotes});
+  final NoteBloc bloc;
+  AddNote({required this.bloc});
 
   @override
   _AddNoteState createState() => _AddNoteState();
@@ -332,9 +328,8 @@ class _AddNoteState extends State<AddNote> {
                   return;
                 }
                 
-                // Use singleton repository directly to add
-                NoteRepository().addNote(_titleController.text, _contentController.text);
-                print('=== REPOSITORY ADD CALLED ===');
+                // Use BLoC properly - dispatch AddNote event
+                widget.bloc.dispatch(noteEvent.AddNote(_titleController.text, _contentController.text));
                 
                 // show confirmation
                 ScaffoldMessenger.of(context).showSnackBar(

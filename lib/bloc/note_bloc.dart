@@ -1,10 +1,14 @@
+import 'dart:async';
 import '../event/note_event.dart';
 import '../state/note_state.dart';
 import '../repository/note_repository.dart';
 
 class NoteBloc {
+  final StreamController<NoteState> _stateController = StreamController<NoteState>.broadcast();
+  
   NoteState _state = NotesInitial();
   NoteState get state => _state;
+  Stream<NoteState> get stateStream => _stateController.stream;
 
   final NoteRepository repository;
 
@@ -23,5 +27,12 @@ class NoteBloc {
       repository.deleteNotes(event.ids);
       _state = NotesLoaded(repository.getNotes());
     }
+    
+    // Emit new state to stream
+    _stateController.add(_state);
+  }
+
+  void dispose() {
+    _stateController.close();
   }
 }
